@@ -9,7 +9,6 @@ pipeline {
         stage('1. Setup & Clean Workspace') {
             steps {
                 echo '--- Dọn dẹp không gian làm việc ---'
-                // Xóa sạch các kết quả cũ và log cũ
                 sh 'rm -rf codeql-db codeql-results.sarif zap-report.html *.log'
                 
                 dir('backend') { sh 'npm install' }
@@ -32,28 +31,27 @@ pipeline {
         stage('3. SAST Scan (CodeQL)') {
             steps {
                 script {
-                    echo '--- Cài đặt CodeQL Bundle (Sẽ tự động xóa nếu bản cũ lỗi) ---'
+                    echo '--- Cài đặt CodeQL Bundle ---'
                     sh '''
-                        # Nếu thư mục tồn tại nhưng thiếu file thực thi chính, xóa đi để tải lại
                         if [ ! -f "codeql-home/codeql/codeql" ]; then
-                            echo "Phát hiện bộ cài lỗi hoặc chưa có, đang tải lại bản Bundle..."
+                            echo "Đang tải CodeQL Bundle..."
                             rm -rf codeql-home codeql-bundle.tar.gz
                             wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz -O codeql-bundle.tar.gz
                             mkdir -p codeql-home
                             tar -xzf codeql-bundle.tar.gz -C ./codeql-home
                             rm codeql-bundle.tar.gz
-                            echo "Đã cài đặt xong CodeQL Bundle chuẩn."
                         fi
                     '''
 
-                    echo '--- Bắt đầu phân tích bằng CodeQL ---'
+                    echo '--- Phân tích bằng CodeQL ---'
                     sh '''
-                        # 1. Tạo Database
+                        # 1. Tạo Database cho dự án JavaScript
                         ./codeql-home/codeql/codeql database create codeql-db --language=javascript --overwrite
                         
-                        # 2. Chạy phân tích (Sử dụng tên gói mặc định của Bundle để không bị lỗi đường dẫn)
+                        # 2. CHỐT HẠ LỖI: Sử dụng --additional-packs để CodeQL tìm thấy bộ quy tắc
                         ./codeql-home/codeql/codeql database analyze codeql-db \
-                        javascript-code-scanning.qls \
+                        codeql/javascript-queries:codeql-suites/javascript-security-and-quality.qls \
+                        --additional-packs=./codeql-home/codeql \
                         --format=sarif-latest --output=codeql-results.sarif
                     '''
                 }
@@ -66,7 +64,6 @@ pipeline {
                     echo '--- Chuẩn bị OWASP ZAP ---'
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
-                            echo "Đang tải bộ cài DAST ZAP..."
                             wget -qO zap.tar.gz https://github.com/zaproxy/zaproxy/releases/download/v2.16.0/ZAP_2.16.0_Linux.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
@@ -91,10 +88,9 @@ pipeline {
 
     post {
         always {
-            echo '--- Pipeline hoàn tất. Đang trích xuất báo cáo ---'
+            echo '--- Tổng hợp báo cáo ---'
             archiveArtifacts artifacts: 'codeql-results.sarif, zap-report.html, *.log', allowEmptyArchive: true
             
-            echo '--- Dọn dẹp hệ thống ---'
             sh '''
                 pkill -f 'node server.js' || true
                 pkill -f 'react-scripts start' || true
