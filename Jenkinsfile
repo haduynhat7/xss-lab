@@ -32,10 +32,10 @@ pipeline {
             steps {
                 script {
                     echo '--- Kiểm tra và cài đặt CodeQL Bundle ---'
-                    // LỆNH QUAN TRỌNG: Nếu thư mục javascript không tồn tại, xóa sạch để tải lại bản Bundle đầy đủ
                     sh '''
-                        if [ ! -d "codeql-home/codeql/javascript" ]; then
-                            echo "Phát hiện bộ CodeQL cũ/thiếu quy tắc. Đang xóa và tải lại bản Bundle đầy đủ..."
+                        # Kiểm tra xem có bộ Queries (thư mục javascript/ql) chưa, nếu chưa có thì phải tải lại Bundle
+                        if [ ! -d "codeql-home/codeql/javascript/ql" ]; then
+                            echo "Phát hiện bộ CodeQL cũ hoặc thiếu quy tắc. Đang tải bản Bundle đầy đủ..."
                             rm -rf codeql-home codeql-bundle.tar.gz
                             wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz -O codeql-bundle.tar.gz
                             mkdir -p codeql-home
@@ -52,9 +52,12 @@ pipeline {
                         # 1. Tạo Database
                         ./codeql-home/codeql/codeql database create codeql-db --language=javascript --overwrite
                         
-                        # 2. Chạy phân tích (Dùng tên suite chuẩn của Bundle)
-                        ./codeql-home/codeql/codeql database analyze codeql-db \
-                        javascript-security-and-quality.qls \
+                        # 2. Tìm đường dẫn file quy tắc .qls trong Bundle
+                        SUITE_PATH=$(find codeql-home -name "javascript-security-and-quality.qls" | head -n 1)
+                        echo "Sử dụng bộ quy tắc tại: $SUITE_PATH"
+                        
+                        # 3. Chạy phân tích
+                        ./codeql-home/codeql/codeql database analyze codeql-db "$SUITE_PATH" \
                         --format=sarif-latest --output=codeql-results.sarif
                     '''
                 }
@@ -74,7 +77,7 @@ pipeline {
                         fi
                     '''
 
-                    echo '--- Khởi động ứng dụng Lab và quét XSS ---'
+                    echo '--- Khởi động Lab và quét XSS ---'
                     sh 'cd backend && nohup node server.js > ../backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
