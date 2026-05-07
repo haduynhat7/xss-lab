@@ -1,15 +1,11 @@
 pipeline {
     agent any
-
-    // BẮT BUỘC PHẢI CÓ KHỐI NÀY ĐỂ JENKINS TẢI NPM
-    tools {
-        nodejs 'node' 
-    }
+    tools { nodejs 'node' }
 
     stages {
         stage('1. Setup & Install') {
             steps {
-                echo 'Đang cài đặt thư viện cho dự án...'
+                echo 'Cài đặt thư viện...'
                 dir('backend') { sh 'npm install' }
                 dir('frontend') { sh 'npm install' }
             }
@@ -17,7 +13,7 @@ pipeline {
 
         stage('2. SCA Scan (Snyk)') {
             steps {
-                echo 'Snyk đang quét thư viện...'
+                echo 'Snyk đang rà soát dependencies...'
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -30,9 +26,20 @@ pipeline {
         stage('3. SAST Scan (CodeQL)') {
             steps {
                 script {
-                    echo 'CodeQL đang truy tìm lỗi XSS...'
-                    sh 'codeql database create codeql-js-db --language=javascript --overwrite'
-                    sh 'codeql database analyze codeql-js-db javascript-security-and-quality.qls --format=sarif-latest --output=codeql-results.sarif'
+                    echo 'Chuẩn bị CodeQL CLI...'
+                    // Tự động tải CodeQL nếu chưa có (Dành cho môi trường Docker)
+                    sh '''
+                        if [ ! -d "codeql-home" ]; then
+                            wget https://github.com/github/codeql-cli-binaries/releases/latest/download/codeql-linux64.zip
+                            unzip codeql-linux64.zip -d ./codeql-home
+                            rm codeql-linux64.zip
+                        fi
+                    '''
+                    echo 'CodeQL đang truy tìm lỗi XSS trong mã nguồn...'
+                    sh '''
+                        ./codeql-home/codeql/codeql database create codeql-js-db --language=javascript --overwrite
+                        ./codeql-home/codeql/codeql database analyze codeql-js-db javascript-security-and-quality.qls --format=sarif-latest --output=codeql-results.sarif
+                    '''
                 }
             }
         }
@@ -40,10 +47,18 @@ pipeline {
         stage('4. DAST Scan (OWASP ZAP)') {
             steps {
                 script {
+                    echo 'Chuẩn bị OWASP ZAP...'
+                    sh '''
+                        if [ ! -d "ZAP_2.16.0" ]; then
+                            wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.0/ZAP_2.16.0_Linux.tar.gz
+                            tar -xvf ZAP_2.16.0_Linux.tar.gz
+                            rm ZAP_2.16.0_Linux.tar.gz
+                        fi
+                    '''
                     echo 'Khởi động ứng dụng và quét DAST...'
                     sh 'cd backend && nohup node server.js > backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > frontend.log 2>&1 &'
-                    sleep 30
+                    sleep 40
                     sh './ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap_report.html'
                 }
             }
@@ -52,7 +67,7 @@ pipeline {
 
     post {
         always {
-            echo 'Dọn dẹp và hoàn tất!'
+            echo 'Dọn dẹp tiến trình...'
             sh "pkill -f 'node server.js' || true"
             sh "pkill -f 'react-scripts start' || true"
         }
