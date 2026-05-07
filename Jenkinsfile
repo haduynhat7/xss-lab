@@ -45,19 +45,17 @@ pipeline {
 
                     echo '--- Phân tích mã nguồn bằng CodeQL ---'
                     sh '''
-                        # Gán đường dẫn vào biến môi trường để dùng cho tiện
                         export PATH=$PATH:$(pwd)/codeql-home/codeql
                         
                         # 1. Tạo database
                         codeql database create codeql-db --language=javascript --overwrite
                         
-                        # 2. Tự động tìm đường dẫn file quy tắc (Mẹo quan trọng)
+                        # 2. Tự động tìm đường dẫn file quy tắc
                         SUITE_PATH=$(find codeql-home -name "javascript-security-and-quality.qls" | head -n 1)
-                        echo "Đã tìm thấy bộ quy tắc tại: $SUITE_PATH"
+                        echo "Bộ quy tắc: $SUITE_PATH"
                         
                         # 3. Chạy phân tích
-                        codeql database analyze codeql-db "$SUITE_PATH" \
-                        --format=sarif-latest --output=codeql-results.sarif
+                        codeql database analyze codeql-db "$SUITE_PATH" --format=sarif-latest --output=codeql-results.sarif
                     '''
                 }
             }
@@ -79,13 +77,13 @@ pipeline {
                     sh 'cd backend && nohup node server.js > ../backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
-                    echo 'Đợi 45 giây để ứng dụng lên hẳn...'
                     sleep 45
 
-                    echo 'ZAP đang quét cổng 3000...'
-                    # Chạy ZAP với quyền thực thi
-                    chmod +x ./ZAP_2.16.0/zap.sh
-                    ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html || true
+                    sh '''
+                        echo "ZAP đang quét cổng 3000..."
+                        chmod +x ./ZAP_2.16.0/zap.sh
+                        ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html || true
+                    '''
                 }
             }
         }
@@ -93,13 +91,14 @@ pipeline {
 
     post {
         always {
-            echo '--- Lưu trữ báo cáo bảo mật ---'
+            echo '--- Lưu trữ báo cáo và dọn dẹp ---'
             archiveArtifacts artifacts: 'codeql-results.sarif, zap-report.html, *.log', allowEmptyArchive: true
             
-            echo '--- Dọn dẹp tiến trình ---'
-            sh "pkill -f 'node server.js' || true"
-            sh "pkill -f 'react-scripts start' || true"
-            sh "pkill -f 'zap' || true"
+            sh '''
+                pkill -f 'node server.js' || true
+                pkill -f 'react-scripts start' || true
+                pkill -f 'zap' || true
+            '''
         }
     }
 }
