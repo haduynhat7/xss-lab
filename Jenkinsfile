@@ -38,7 +38,6 @@ pipeline {
             steps {
                 script {
                     echo 'Chuẩn bị môi trường CodeQL Bundle (CLI + Queries)...'
-                    // Tải bản Bundle (nặng ~1GB) chứa sẵn các bộ quy tắc .qls
                     sh '''
                         if [ ! -d "codeql-home/codeql" ]; then
                             echo "Đang tải CodeQL Bundle... (Vui lòng đợi 3-5 phút)"
@@ -46,7 +45,7 @@ pipeline {
                             wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz
                             mkdir -p codeql-home
                             tar -xzf codeql-bundle-linux64.tar.gz -C ./codeql-home
-                            rm codeql-bundle.tar.gz
+                            rm codeql-bundle-linux64.tar.gz
                         fi
                     '''
 
@@ -77,9 +76,32 @@ pipeline {
                         fi
                     '''
 
-                    echo 'Khởi động ứng dụng Lab để ZAP có mục tiêu quét...'
-                    // Chạy server ngầm và ghi log để debug nếu cần
+                    echo 'Khởi động ứng dụng Lab...'
+                    // Chạy server ngầm
                     sh 'cd backend && nohup node server.js > ../backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
-                    echo 'Chờ 45 giây để hệ thống khởi động hoàn toàn
+                    echo 'Chờ hệ thống khởi động hoàn toàn...'
+                    sleep 45
+
+                    echo 'ZAP đang thực hiện quét lỗi XSS...'
+                    sh './ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline kết thúc. Đang lưu trữ báo cáo...'
+            
+            // Lưu báo cáo để tải về từ giao diện Jenkins
+            archiveArtifacts artifacts: 'codeql-results.sarif, zap-report.html, *.log', allowEmptyArchive: true
+            
+            echo 'Dọn dẹp tiến trình chạy ngầm...'
+            sh "pkill -f 'node server.js' || true"
+            sh "pkill -f 'react-scripts start' || true"
+            sh "pkill -f 'zap' || true"
+        }
+    }
+}
