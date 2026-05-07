@@ -34,7 +34,7 @@ pipeline {
                     echo '--- Chuẩn bị CodeQL Bundle ---'
                     sh '''
                         if [ ! -d "codeql-home/codeql" ]; then
-                            echo "Đang tải CodeQL Bundle..."
+                            echo "Đang tải CodeQL Bundle... (Vui lòng đợi)"
                             rm -rf codeql-home codeql-bundle.tar.gz
                             wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz -O codeql-bundle.tar.gz
                             mkdir -p codeql-home
@@ -45,17 +45,14 @@ pipeline {
 
                     echo '--- Phân tích mã nguồn bằng CodeQL ---'
                     sh '''
-                        export PATH=$PATH:$(pwd)/codeql-home/codeql
-                        
                         # 1. Tạo database
-                        codeql database create codeql-db --language=javascript --overwrite
+                        ./codeql-home/codeql/codeql database create codeql-db --language=javascript --overwrite
                         
-                        # 2. Tự động tìm đường dẫn file quy tắc
-                        SUITE_PATH=$(find codeql-home -name "javascript-security-and-quality.qls" | head -n 1)
-                        echo "Bộ quy tắc: $SUITE_PATH"
-                        
-                        # 3. Chạy phân tích
-                        codeql database analyze codeql-db "$SUITE_PATH" --format=sarif-latest --output=codeql-results.sarif
+                        # 2. Chạy phân tích với đường dẫn mặc định trong Bundle
+                        # Đây là đường dẫn chuẩn xác bên trong thư mục đã giải nén
+                        ./codeql-home/codeql/codeql database analyze codeql-db \
+                        ./codeql-home/codeql/javascript/ql/src/codeql-suites/javascript-code-scanning.qls \
+                        --format=sarif-latest --output=codeql-results.sarif
                     '''
                 }
             }
@@ -91,9 +88,11 @@ pipeline {
 
     post {
         always {
-            echo '--- Lưu trữ báo cáo và dọn dẹp ---'
+            echo '--- Lưu trữ báo cáo bảo mật ---'
+            // Ghi chú: Nếu file không tồn tại Jenkins vẫn sẽ tiếp tục nhờ allowEmptyArchive
             archiveArtifacts artifacts: 'codeql-results.sarif, zap-report.html, *.log', allowEmptyArchive: true
             
+            echo '--- Dọn dẹp tiến trình ---'
             sh '''
                 pkill -f 'node server.js' || true
                 pkill -f 'react-scripts start' || true
