@@ -9,6 +9,7 @@ pipeline {
         stage('1. Setup & Clean Workspace') {
             steps {
                 echo '--- Dọn dẹp không gian làm việc ---'
+                // Xóa sạch các kết quả cũ và log cũ
                 sh 'rm -rf codeql-db codeql-results.sarif zap-report.html *.log'
                 
                 dir('backend') { sh 'npm install' }
@@ -18,7 +19,7 @@ pipeline {
 
         stage('2. SCA Scan (Snyk)') {
             steps {
-                echo '--- Snyk đang quét lỗ hổng thư viện ---'
+                echo '--- Snyk đang rà soát lỗ hổng thư viện ---'
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -31,27 +32,28 @@ pipeline {
         stage('3. SAST Scan (CodeQL)') {
             steps {
                 script {
-                    echo '--- Chuẩn bị CodeQL Bundle ---'
+                    echo '--- Cài đặt CodeQL Bundle (Sẽ tự động xóa nếu bản cũ lỗi) ---'
                     sh '''
-                        if [ ! -d "codeql-home/codeql" ]; then
-                            echo "Đang tải CodeQL Bundle... (Vui lòng đợi)"
+                        # Nếu thư mục tồn tại nhưng thiếu file thực thi chính, xóa đi để tải lại
+                        if [ ! -f "codeql-home/codeql/codeql" ]; then
+                            echo "Phát hiện bộ cài lỗi hoặc chưa có, đang tải lại bản Bundle..."
                             rm -rf codeql-home codeql-bundle.tar.gz
                             wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz -O codeql-bundle.tar.gz
                             mkdir -p codeql-home
                             tar -xzf codeql-bundle.tar.gz -C ./codeql-home
                             rm codeql-bundle.tar.gz
+                            echo "Đã cài đặt xong CodeQL Bundle chuẩn."
                         fi
                     '''
 
-                    echo '--- Phân tích mã nguồn bằng CodeQL ---'
+                    echo '--- Bắt đầu phân tích bằng CodeQL ---'
                     sh '''
-                        # 1. Tạo database
+                        # 1. Tạo Database
                         ./codeql-home/codeql/codeql database create codeql-db --language=javascript --overwrite
                         
-                        # 2. Chạy phân tích với đường dẫn mặc định trong Bundle
-                        # Đây là đường dẫn chuẩn xác bên trong thư mục đã giải nén
+                        # 2. Chạy phân tích (Sử dụng tên gói mặc định của Bundle để không bị lỗi đường dẫn)
                         ./codeql-home/codeql/codeql database analyze codeql-db \
-                        ./codeql-home/codeql/javascript/ql/src/codeql-suites/javascript-code-scanning.qls \
+                        javascript-code-scanning.qls \
                         --format=sarif-latest --output=codeql-results.sarif
                     '''
                 }
@@ -64,20 +66,21 @@ pipeline {
                     echo '--- Chuẩn bị OWASP ZAP ---'
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
+                            echo "Đang tải bộ cài DAST ZAP..."
                             wget -qO zap.tar.gz https://github.com/zaproxy/zaproxy/releases/download/v2.16.0/ZAP_2.16.0_Linux.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
                         fi
                     '''
 
-                    echo '--- Khởi động ứng dụng và quét DAST ---'
+                    echo '--- Khởi động Lab và quét lỗi XSS ---'
                     sh 'cd backend && nohup node server.js > ../backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
+                    echo "Chờ ứng dụng khởi động trong 45 giây..."
                     sleep 45
 
                     sh '''
-                        echo "ZAP đang quét cổng 3000..."
                         chmod +x ./ZAP_2.16.0/zap.sh
                         ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html || true
                     '''
@@ -88,11 +91,10 @@ pipeline {
 
     post {
         always {
-            echo '--- Lưu trữ báo cáo bảo mật ---'
-            // Ghi chú: Nếu file không tồn tại Jenkins vẫn sẽ tiếp tục nhờ allowEmptyArchive
+            echo '--- Pipeline hoàn tất. Đang trích xuất báo cáo ---'
             archiveArtifacts artifacts: 'codeql-results.sarif, zap-report.html, *.log', allowEmptyArchive: true
             
-            echo '--- Dọn dẹp tiến trình ---'
+            echo '--- Dọn dẹp hệ thống ---'
             sh '''
                 pkill -f 'node server.js' || true
                 pkill -f 'react-scripts start' || true
