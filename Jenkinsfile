@@ -1,15 +1,15 @@
 pipeline {
     agent any
 
-    // --- XÓA KHỐI ENVIRONMENT NÀY ---
-    // environment {
-    //    SNYK_TOKEN = credentials('snyk-token')
-    // }
+    // BẮT BUỘC PHẢI CÓ KHỐI NÀY ĐỂ JENKINS TẢI NPM
+    tools {
+        nodejs 'node' 
+    }
 
     stages {
         stage('1. Setup & Install') {
             steps {
-                echo 'Đang chuẩn bị môi trường...'
+                echo 'Đang cài đặt thư viện cho dự án...'
                 dir('backend') { sh 'npm install' }
                 dir('frontend') { sh 'npm install' }
             }
@@ -17,8 +17,7 @@ pipeline {
 
         stage('2. SCA Scan (Snyk)') {
             steps {
-                echo 'Snyk đang quét thư viện lỗi thời...'
-                // Plugin sẽ tự động tìm ID 'snyk-token' trong Jenkins Credentials
+                echo 'Snyk đang quét thư viện...'
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -33,10 +32,7 @@ pipeline {
                 script {
                     echo 'CodeQL đang truy tìm lỗi XSS...'
                     sh 'codeql database create codeql-js-db --language=javascript --overwrite'
-                    sh '''
-                        codeql database analyze codeql-js-db javascript-security-and-quality.qls \
-                        --format=sarif-latest --output=codeql-results.sarif
-                    '''
+                    sh 'codeql database analyze codeql-js-db javascript-security-and-quality.qls --format=sarif-latest --output=codeql-results.sarif'
                 }
             }
         }
@@ -45,10 +41,9 @@ pipeline {
             steps {
                 script {
                     echo 'Khởi động ứng dụng và quét DAST...'
-                    sh 'cd backend && nohup node server.js & '
-                    sh 'cd frontend && nohup npm start & '
+                    sh 'cd backend && nohup node server.js > backend.log 2>&1 &'
+                    sh 'cd frontend && nohup npm start > frontend.log 2>&1 &'
                     sleep 30
-                    // Đảm bảo đường dẫn tới zap.sh là chính xác trên máy Jenkins
                     sh './ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap_report.html'
                 }
             }
@@ -57,8 +52,7 @@ pipeline {
 
     post {
         always {
-            echo 'Hoàn thành quét bảo mật. Hãy kiểm tra các file báo cáo!'
-            // Tắt các tiến trình chạy ngầm để tránh treo cổng port
+            echo 'Dọn dẹp và hoàn tất!'
             sh "pkill -f 'node server.js' || true"
             sh "pkill -f 'react-scripts start' || true"
         }
