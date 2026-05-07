@@ -2,24 +2,29 @@ pipeline {
     agent any
 
     tools {
-        nodejs 'node' // Đảm bảo bạn đã đặt tên 'node' trong Global Tool Configuration
+        // Tên 'node' phải trùng với tên bạn đặt trong Manage Jenkins -> Tools
+        nodejs 'node' 
     }
 
     stages {
         stage('1. Setup & Clean Workspace') {
             steps {
-                echo 'Đang dọn dẹp và cài đặt thư viện...'
-                // Dọn dẹp database cũ và file nén lỗi nếu có
+                echo 'Đang dọn dẹp không gian làm việc và cài đặt thư viện...'
+                // Xóa các file kết quả cũ để tránh xung đột
                 sh 'rm -rf codeql-db codeql-results.sarif zap-report.html backend.log frontend.log'
                 
-                dir('backend') { sh 'npm install' }
-                dir('frontend') { sh 'npm install' }
+                dir('backend') { 
+                    sh 'npm install' 
+                }
+                dir('frontend') { 
+                    sh 'npm install' 
+                }
             }
         }
 
         stage('2. SCA Scan (Snyk)') {
             steps {
-                echo 'Snyk đang quét các thư viện (dependencies)...'
+                echo 'Snyk đang quét các thư viện (dependencies) lỗi thời...'
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -32,22 +37,27 @@ pipeline {
         stage('3. SAST Scan (CodeQL)') {
             steps {
                 script {
-                    echo 'Chuẩn bị môi trường CodeQL...'
-                    // Chỉ tải nếu chưa có thư mục codeql-home hoàn chỉnh
+                    echo 'Chuẩn bị môi trường CodeQL Bundle (CLI + Queries)...'
+                    // Tải bản Bundle (nặng ~1GB) chứa sẵn các bộ quy tắc .qls
                     sh '''
                         if [ ! -d "codeql-home/codeql" ]; then
-                            echo "Đang tải CodeQL CLI..."
-                            rm -rf codeql-home codeql-linux64.zip
-                            wget -q https://github.com/github/codeql-cli-binaries/releases/latest/download/codeql-linux64.zip
-                            unzip -q codeql-linux64.zip -d ./codeql-home
-                            rm codeql-linux64.zip
+                            echo "Đang tải CodeQL Bundle... (Vui lòng đợi 3-5 phút)"
+                            rm -rf codeql-home codeql-bundle.tar.gz
+                            wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz
+                            mkdir -p codeql-home
+                            tar -xzf codeql-bundle-linux64.tar.gz -C ./codeql-home
+                            rm codeql-bundle.tar.gz
                         fi
                     '''
 
                     echo 'Bắt đầu phân tích mã nguồn bằng CodeQL...'
                     sh '''
+                        # 1. Tạo database cho Javascript
                         ./codeql-home/codeql/codeql database create codeql-db --language=javascript --overwrite
-                        ./codeql-home/codeql/codeql database analyze codeql-db javascript-security-and-quality.qls \
+                        
+                        # 2. Quét lỗi bằng bộ quy tắc Security & Quality
+                        ./codeql-home/codeql/codeql database analyze codeql-db \
+                        javascript-security-and-quality.qls \
                         --format=sarif-latest --output=codeql-results.sarif
                     '''
                 }
@@ -67,35 +77,9 @@ pipeline {
                         fi
                     '''
 
-                    echo 'Khởi động ứng dụng Lab...'
-                    // Chạy server ngầm và đẩy log ra file để theo dõi
+                    echo 'Khởi động ứng dụng Lab để ZAP có mục tiêu quét...'
+                    // Chạy server ngầm và ghi log để debug nếu cần
                     sh 'cd backend && nohup node server.js > ../backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
-                    echo 'Chờ 45 giây để ứng dụng lên hẳn...'
-                    sleep 45
-
-                    echo 'ZAP đang tấn công giả lập vào cổng 3000...'
-                    // Thực hiện quét DAST
-                    sh './ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html'
-                }
-            }
-        }
-    }
-
-    post {
-        always {
-            echo 'Hoàn thành Pipeline. Đang tổng hợp báo cáo và dọn dẹp...'
-            
-            // 1. Lưu báo cáo vào phần Artifacts của Jenkins để tải về
-            archiveArtifacts artifacts: 'codeql-results.sarif, zap-report.html, *.log', allowEmptyArchive: true
-            
-            // 2. Tắt các tiến trình chạy ngầm để giải phóng RAM và Port
-            sh "pkill -f 'node server.js' || true"
-            sh "pkill -f 'react-scripts start' || true"
-            sh "pkill -f 'zap' || true"
-            
-            echo '--- PIPELINE FINISHED ---'
-        }
-    }
-}
+                    echo 'Chờ 45 giây để hệ thống khởi động hoàn toàn
