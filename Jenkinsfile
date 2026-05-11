@@ -16,11 +16,11 @@ pipeline {
             }
         }
 
-stage('2. Security Scan (Snyk SCA & SAST)') {
+        stage('2. Security Scan (Snyk SCA & SAST)') {
             steps {
                 echo '--- Snyk rà soát thư viện (SCA) và mã nguồn (SAST) ---'
                 
-                // 1. Quét thư viện (SCA) cho cả hai thư mục
+                // 1. Quét thư viện (SCA)
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -34,11 +34,11 @@ stage('2. Security Scan (Snyk SCA & SAST)') {
                     failOnIssues: false
                 )
 
-                // 2. Quét mã nguồn (SAST) - Fix lỗi 401 Unauthorized
+                // 2. Quét mã nguồn (SAST) - Fix lỗi định dạng Credentials
                 script {
                     def snykTool = tool 'snyk-cli'
-                    // Sử dụng withCredentials để truyền Token vào lệnh sh
-                    withCredentials([string(credentialsId: 'snyk-token', variable: 'SNYK_TOKEN')]) {
+                    // Sử dụng lớp chuyên biệt để lấy Token từ plugin Snyk
+                    withCredentials([[$class: 'SnykApiTokenIdCredentialsBinding', credentialsId: 'snyk-token', variable: 'SNYK_TOKEN']]) {
                         sh "${snykTool}/snyk-linux code test --fail-on=all || true"
                     }
                 }
@@ -51,7 +51,8 @@ stage('2. Security Scan (Snyk SCA & SAST)') {
                     echo '--- Chuẩn bị OWASP ZAP ---'
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
-                            echo "Đang tải OWASP ZAP..."
+                            echo "Đang tải OWASP ZAP bản đầy đủ..."
+                            # Link chuẩn để không bị lỗi giải nén
                             wget -q https://github.com -O zap.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
@@ -66,7 +67,6 @@ stage('2. Security Scan (Snyk SCA & SAST)') {
                     sh 'timeout 60s bash -c "until curl -s localhost:3000 > /dev/null; do sleep 5; done" || true'
 
                     echo '--- Tiến hành quét DAST ---'
-                    // Sử dụng $(pwd) để đảm bảo ZAP có quyền ghi file báo cáo vào đúng thư mục workspace
                     sh '''
                         chmod +x ./ZAP_2.16.0/zap.sh
                         ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout $(pwd)/zap-report.html || true
