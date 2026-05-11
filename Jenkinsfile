@@ -9,7 +9,7 @@ pipeline {
         stage('1. Setup & Clean Workspace') {
             steps {
                 echo '--- Dọn dẹp không gian làm việc ---'
-                sh 'rm -rf zap-report.html *.log'
+                sh 'rm -rf zap-report.html *.log codeql-db'
                 
                 dir('backend') { sh 'npm install' }
                 dir('frontend') { sh 'npm install' }
@@ -20,7 +20,7 @@ pipeline {
             steps {
                 echo '--- Snyk rà soát thư viện (SCA) và mã nguồn (SAST) ---'
                 
-                // Quét thư viện (SCA)
+                // 1. Quét thư viện (SCA) bằng Plugin
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -34,10 +34,10 @@ pipeline {
                     failOnIssues: false
                 )
 
-                // Quét mã nguồn (SAST) - Sử dụng đường dẫn từ plugin để tránh lỗi "snyk not found"
+                // 2. Quét mã nguồn (SAST) - Sử dụng đúng file snyk-linux bạn đã tìm thấy
                 script {
                     def snykTool = tool 'snyk-cli'
-                    sh "${snykTool}/snyk code test --fail-on=all || true"
+                    sh "${snykTool}/snyk-linux code test --fail-on=all || true"
                 }
             }
         }
@@ -48,9 +48,8 @@ pipeline {
                     echo '--- Chuẩn bị OWASP ZAP ---'
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
-                            echo "Đang tải OWASP ZAP (Link đầy đủ)..."
-                            # Sửa lại link chuẩn để không bị lỗi tar
-                            wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.16.0/ZAP_2.16.0_Linux.tar.gz -O zap.tar.gz
+                            echo "Đang tải OWASP ZAP..."
+                            wget -q https://github.com -O zap.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
                         fi
@@ -60,13 +59,14 @@ pipeline {
                     sh 'cd backend && nohup node server.js > ../backend.log 2>&1 &'
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
-                    echo "Chờ dịch vụ khởi động (tối đa 60s)..."
+                    echo "Chờ dịch vụ khởi động (60s)..."
                     sh 'timeout 60s bash -c "until curl -s localhost:3000 > /dev/null; do sleep 5; done" || true'
 
                     echo '--- Tiến hành quét DAST ---'
+                    // Sử dụng $(pwd) để đảm bảo ZAP có quyền ghi file báo cáo vào đúng thư mục workspace
                     sh '''
                         chmod +x ./ZAP_2.16.0/zap.sh
-                        ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html || true
+                        ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout $(pwd)/zap-report.html || true
                     '''
                 }
             }
