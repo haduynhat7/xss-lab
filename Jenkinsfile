@@ -16,11 +16,11 @@ pipeline {
             }
         }
 
-        stage('2. Security Scan (Snyk SCA & SAST)') {
+stage('2. Security Scan (Snyk SCA & SAST)') {
             steps {
                 echo '--- Snyk rà soát thư viện (SCA) và mã nguồn (SAST) ---'
                 
-                // 1. Quét thư viện (SCA) bằng Plugin
+                // 1. Quét thư viện (SCA) cho cả hai thư mục
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -34,10 +34,13 @@ pipeline {
                     failOnIssues: false
                 )
 
-                // 2. Quét mã nguồn (SAST) - Sử dụng đúng file snyk-linux bạn đã tìm thấy
+                // 2. Quét mã nguồn (SAST) - Fix lỗi 401 Unauthorized
                 script {
                     def snykTool = tool 'snyk-cli'
-                    sh "${snykTool}/snyk-linux code test --fail-on=all || true"
+                    // Sử dụng withCredentials để truyền Token vào lệnh sh
+                    withCredentials([string(credentialsId: 'snyk-token', variable: 'SNYK_TOKEN')]) {
+                        sh "${snykTool}/snyk-linux code test --fail-on=all || true"
+                    }
                 }
             }
         }
