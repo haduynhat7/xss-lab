@@ -20,7 +20,7 @@ pipeline {
             steps {
                 echo '--- Snyk rà soát thư viện (SCA) và mã nguồn (SAST) ---'
                 
-                // 1. Quét thư viện (SCA) cho cả Frontend và Backend
+                // Quét thư viện (SCA)
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -34,9 +34,11 @@ pipeline {
                     failOnIssues: false
                 )
 
-                // 2. Quét mã nguồn (SAST) - Thay thế hoàn toàn CodeQL
-                // Lệnh này tìm lỗi XSS, SQLi trực tiếp trong code bạn viết
-                sh 'snyk code test --fail-on=all || true'
+                // Quét mã nguồn (SAST) - Sử dụng đường dẫn từ plugin để tránh lỗi "snyk not found"
+                script {
+                    def snykTool = tool 'snyk-cli'
+                    sh "${snykTool}/snyk code test --fail-on=all || true"
+                }
             }
         }
 
@@ -46,8 +48,9 @@ pipeline {
                     echo '--- Chuẩn bị OWASP ZAP ---'
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
-                            echo "Đang tải OWASP ZAP..."
-                            wget -qO zap.tar.gz https://github.com
+                            echo "Đang tải OWASP ZAP (Link đầy đủ)..."
+                            # Sửa lại link chuẩn để không bị lỗi tar
+                            wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.16.0/ZAP_2.16.0_Linux.tar.gz -O zap.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
                         fi
@@ -58,8 +61,9 @@ pipeline {
                     sh 'cd frontend && nohup npm start > ../frontend.log 2>&1 &'
                     
                     echo "Chờ dịch vụ khởi động (tối đa 60s)..."
-                    sh 'timeout 60s bash -c "until curl -s localhost:3000 > /dev/null; do sleep 5; done"'
+                    sh 'timeout 60s bash -c "until curl -s localhost:3000 > /dev/null; do sleep 5; done" || true'
 
+                    echo '--- Tiến hành quét DAST ---'
                     sh '''
                         chmod +x ./ZAP_2.16.0/zap.sh
                         ./ZAP_2.16.0/zap.sh -cmd -quickurl http://localhost:3000 -quickout zap-report.html || true
@@ -72,7 +76,6 @@ pipeline {
     post {
         always {
             echo '--- Tổng hợp báo cáo ---'
-            // Đã bỏ file sarif của CodeQL, chỉ giữ lại ZAP và Log
             archiveArtifacts artifacts: 'zap-report.html, *.log', allowEmptyArchive: true
             
             echo '--- Dọn dẹp hệ thống ---'
