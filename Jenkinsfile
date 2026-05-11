@@ -20,7 +20,7 @@ pipeline {
             steps {
                 echo '--- Snyk rà soát thư viện (SCA) và mã nguồn (SAST) ---'
                 
-                // 1. Quét thư viện (SCA)
+                // Quét thư viện (SCA) - Vẫn dùng cái ID cũ 'snyk-token'
                 snykSecurity(
                     snykInstallation: 'snyk-cli',
                     snykTokenId: 'snyk-token', 
@@ -34,10 +34,10 @@ pipeline {
                     failOnIssues: false
                 )
 
-                // 2. Quét mã nguồn (SAST) - Sử dụng đúng class cho Snyk Token
+                // Quét mã nguồn (SAST) - Dùng cái ID 'snyk-token-secret' mới tạo
                 script {
                     def snykTool = tool 'snyk-cli'
-                    withCredentials([[$class: 'SnykApiTokenIdCredentialsBinding', credentialsId: 'snyk-token', variable: 'SNYK_TOKEN']]) {
+                    withCredentials([string(credentialsId: 'snyk-token-secret', variable: 'SNYK_TOKEN')]) {
                         sh "${snykTool}/snyk-linux code test --fail-on=all || true"
                     }
                 }
@@ -51,7 +51,6 @@ pipeline {
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
                             echo "Đang tải OWASP ZAP bản đầy đủ..."
-                            # PHẢI CÓ LINK ĐẦY ĐỦ NHƯ DƯỚI ĐÂY:
                             wget -q https://github.com -O zap.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
