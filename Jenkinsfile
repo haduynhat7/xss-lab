@@ -34,10 +34,9 @@ pipeline {
                     failOnIssues: false
                 )
 
-                // 2. Quét mã nguồn (SAST) - Fix lỗi định dạng Credentials
+                // 2. Quét mã nguồn (SAST) - Sử dụng đúng class cho Snyk Token
                 script {
                     def snykTool = tool 'snyk-cli'
-                    // Sử dụng lớp chuyên biệt để lấy Token từ plugin Snyk
                     withCredentials([[$class: 'SnykApiTokenIdCredentialsBinding', credentialsId: 'snyk-token', variable: 'SNYK_TOKEN']]) {
                         sh "${snykTool}/snyk-linux code test --fail-on=all || true"
                     }
@@ -52,7 +51,7 @@ pipeline {
                     sh '''
                         if [ ! -d "ZAP_2.16.0" ]; then
                             echo "Đang tải OWASP ZAP bản đầy đủ..."
-                            # Link chuẩn để không bị lỗi giải nén
+                            # PHẢI CÓ LINK ĐẦY ĐỦ NHƯ DƯỚI ĐÂY:
                             wget -q https://github.com -O zap.tar.gz
                             tar -xzf zap.tar.gz
                             rm zap.tar.gz
